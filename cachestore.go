@@ -58,6 +58,10 @@ func DeleteMulti(c appengine.Context, keys []*datastore.Key) error {
 // or when a field is missing or unexported in the destination struct. ErrFieldMismatch is only returned if dst is
 // a struct pointer.
 func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
+	return get(c, key, dst, false)
+}
+
+func get(c appengine.Context, key *datastore.Key, dst interface{}, readOnly bool) error {
 	// check cache
 	item, err := memcache.Get(c, key.Encode())
 	if err != nil {
@@ -69,14 +73,16 @@ func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
 		if err != nil {
 			return err
 		}
-		// cache for next time
-		value, err := encode(dst)
-		if err == nil {
-			item = &memcache.Item{Key: key.Encode(), Value: value}
-			err = memcache.Set(c, item)
-		}
-		if err != nil {
-			c.Warningf(err.Error())
+		if !readOnly {
+			// cache for next time
+			value, err := encode(dst)
+			if err == nil {
+				item = &memcache.Item{Key: key.Encode(), Value: value}
+				err = memcache.Set(c, item)
+			}
+			if err != nil {
+				c.Warningf(err.Error())
+			}
 		}
 		return nil
 	}
@@ -98,13 +104,9 @@ func decode(value []byte, e interface{}) error {
 	return decoder.Decode(e)
 }
 
-// GetOnly is like Get but it doesn't write to memcache on a cache miss instead it just reads from datastore.
+// GetOnly is a read only version of Get. memcache is not written to on cache miss.
 func GetOnly(c appengine.Context, key *datastore.Key, dst interface{}) error {
-	item, err := memcache.Get(c, key.Encode())
-	if err != nil {
-		return datastore.Get(c, key, dst)
-	}
-	return decode(item.Value, dst)
+	return get(c, key, dst, true)
 }
 
 // GetMulti is a batch version of Get. Cached values are returned from memcache, uncached values are returned from
@@ -117,6 +119,10 @@ func GetOnly(c appengine.Context, key *datastore.Key, dst interface{}) error {
 // As a special case, PropertyList is an invalid type for dst, even though a PropertyList is a slice of structs.
 // It is treated as invalid to avoid being mistakenly passed when []PropertyList was intended.
 func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error {
+	return getMulti(c, keys, dst, false)
+}
+
+func getMulti(c appengine.Context, keys []*datastore.Key, dst interface{}, readOnly bool) error {
 	// check cache
 	encodedKeys := encodeKeys(keys)
 	itemMap, err := memcache.GetMulti(c, encodedKeys)
@@ -130,13 +136,15 @@ func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error
 		if err != nil {
 			return err
 		}
-		// cache for next time
-		items, err := encodeItems(keys, dst)
-		if err == nil {
-			err = memcache.SetMulti(c, items)
-		}
-		if err != nil {
-			c.Warningf(err.Error())
+		if !readOnly {
+			// cache for next time
+			items, err := encodeItems(keys, dst)
+			if err == nil {
+				err = memcache.SetMulti(c, items)
+			}
+			if err != nil {
+				c.Warningf(err.Error())
+			}
 		}
 		return nil
 	}
@@ -189,7 +197,10 @@ func decodeItems(keys []*datastore.Key, items map[string]*memcache.Item, dst int
 	return nil
 }
 
-// TODO GetOnlyMulti
+// GetOnlyMulti is a read only version of GetMulti. memcache is not written to on cache miss.
+func GetOnlyMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error {
+	return getMulti(c, keys, dst, true)
+}
 
 // Put saves the entity src into memcache using memcache.Set() and datastore with key k. src must be a struct
 // pointer or implement PropertyLoadSaver; if a struct pointer then any unexported fields of that struct will

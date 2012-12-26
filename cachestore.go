@@ -15,9 +15,12 @@ You should have received a copy of the GNU General Public License
 along with Tessernote.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-// Handles memcache-ing objects transparently when making datastore calls.
-// Uses datastore.Key.Encode() as memcache.Item.Key and gob encoded values.
-// memcache errors are written to appengine.Context.Warningf and otherwise ignored.
+// Automatically caches objects in memcache using gob and the objects encoded datastore.Key.
+// Reads check memcache and fallback to datastore. Writes write to both memcache and datastore.
+// Datastore consistency is guarranteed. Even if an error occurs in memcache, objects are still
+// written to datastore. Memcache errors are logged to appengine.Context.
+//
+// Types need to be registered with gob.Register(interface{}) for cachestore to be able to store them.
 package cachestore
 
 import (
@@ -29,19 +32,20 @@ import (
 	"reflect"
 )
 
+var Debug = false // If true, print debug info
+
 // Delete deletes the entity for the given key from memcache and datastore.
 func Delete(c appengine.Context, key *datastore.Key) error {
-	err := memcache.Delete(c, key.Encode())
-	if err != nil {
-		c.Warningf(err.Error())
+	err := DeleteMulti(c, []*datastore.Key{key})
+	if me, ok := err.(appengine.MultiError); ok {
+		return me[0]
 	}
-	return datastore.Delete(c, key)
+	return err
 }
 
 // DeleteMulti is a batched version of Delete
 func DeleteMulti(c appengine.Context, keys []*datastore.Key) error {
-	err := memcache.DeleteMulti(c, encodeKeys(keys))
-	if err != nil {
+	if err := memcache.DeleteMulti(c, encodeKeys(keys)); err != nil {
 		c.Warningf(err.Error())
 	}
 	return datastore.DeleteMulti(c, keys)
@@ -58,55 +62,12 @@ func DeleteMulti(c appengine.Context, keys []*datastore.Key) error {
 // or when a field is missing or unexported in the destination struct. ErrFieldMismatch is only returned if dst is
 // a struct pointer.
 func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
-	return get(c, key, dst, false)
-}
-
-func get(c appengine.Context, key *datastore.Key, dst interface{}, readOnly bool) error {
-	// check cache
-	item, err := memcache.Get(c, key.Encode())
-	if err != nil {
-		if err != memcache.ErrCacheMiss {
-			c.Warningf(err.Error())
-		}
-		// load from datastore
-		err = datastore.Get(c, key, dst)
-		if err != nil {
-			return err
-		}
-		if !readOnly {
-			// cache for next time
-			value, err := encode(dst)
-			if err == nil {
-				item = &memcache.Item{Key: key.Encode(), Value: value}
-				err = memcache.Set(c, item)
-			}
-			if err != nil {
-				c.Warningf(err.Error())
-			}
-		}
-		return nil
+	err := GetMulti(c, []*datastore.Key{key}, []interface{}{dst})
+	if me, ok := err.(appengine.MultiError); ok {
+		return me[0]
 	}
-	return decode(item.Value, dst)
-}
-
-// encode turns e into gob encoded bytes
-func encode(e interface{}) ([]byte, error) {
-	buffer := new(bytes.Buffer)
-	encoder := gob.NewEncoder(buffer)
-	err := encoder.Encode(e)
-	return buffer.Bytes(), err
-}
-
-// decode decodes gob encoded bytes and writes them to e
-func decode(value []byte, e interface{}) error {
-	reader := bytes.NewReader(value)
-	decoder := gob.NewDecoder(reader)
-	return decoder.Decode(e)
-}
-
-// GetOnly is a read only version of Get. memcache is not written to on cache miss.
-func GetOnly(c appengine.Context, key *datastore.Key, dst interface{}) error {
-	return get(c, key, dst, true)
+	c.Infof("get: %#v", dst)
+	return err
 }
 
 // GetMulti is a batch version of Get. Cached values are returned from memcache, uncached values are returned from
@@ -119,10 +80,6 @@ func GetOnly(c appengine.Context, key *datastore.Key, dst interface{}) error {
 // As a special case, PropertyList is an invalid type for dst, even though a PropertyList is a slice of structs.
 // It is treated as invalid to avoid being mistakenly passed when []PropertyList was intended.
 func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error {
-	return getMulti(c, keys, dst, false)
-}
-
-func getMulti(c appengine.Context, keys []*datastore.Key, dst interface{}, readOnly bool) error {
 	// check cache
 	encodedKeys := encodeKeys(keys)
 	itemMap, err := memcache.GetMulti(c, encodedKeys)
@@ -133,22 +90,35 @@ func getMulti(c appengine.Context, keys []*datastore.Key, dst interface{}, readO
 		// TODO benchmark loading all vs loading missing
 		// load from datastore
 		err = datastore.GetMulti(c, keys, dst)
+		if Debug {
+			c.Debugf("reading from store: %#v", dst)
+		}
 		if err != nil {
 			return err
 		}
-		if !readOnly {
-			// cache for next time
-			items, err := encodeItems(keys, dst)
-			if err == nil {
-				err = memcache.SetMulti(c, items)
-			}
-			if err != nil {
-				c.Warningf(err.Error())
-			}
+		// cache for next time
+		cache(keys, dst, c)
+	} else {
+		err = decodeItems(keys, itemMap, dst)
+		if Debug {
+			c.Debugf("reading from cache: %#v", dst)
 		}
-		return nil
 	}
-	return decodeItems(keys, itemMap, dst)
+	c.Infof("get multi: %#v", dst) // TODO fix dst not getting passed
+	return err
+}
+
+func cache(keys []*datastore.Key, src interface{}, c appengine.Context) {
+	items, err := encodeItems(keys, src)
+	if len(items) > 0 && err == nil {
+		if Debug {
+			c.Debugf("writing to cache: %#v", src)
+		}
+		err = memcache.SetMulti(c, items)
+	}
+	if err != nil {
+		c.Warningf(err.Error())
+	}
 }
 
 // encodeKeys returns an array of string encoded datastore.Keys
@@ -163,10 +133,15 @@ func encodeKeys(keys []*datastore.Key) []string {
 // encodeItems returns an array of memcache.Items for all key/value pair where the key is not incomplete.
 func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, error) {
 	v := reflect.ValueOf(values)
+	multiArgType, _ := checkMultiArg(v)
 	items := *new([]*memcache.Item)
 	for i, key := range keys {
 		if !key.Incomplete() {
-			value, err := encode(v.Index(i))
+			elem := v.Index(i)
+			if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
+				elem = elem.Addr()
+			}
+			value, err := encode(elem)
 			if err != nil {
 				return items, err
 			}
@@ -177,6 +152,15 @@ func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, e
 	return items, nil
 }
 
+// TODO memcache items are restricted to 1MB
+// encode encodes v using gob.Encoder
+func encode(v reflect.Value) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	encoder := gob.NewEncoder(buffer)
+	err := encoder.EncodeValue(v)
+	return buffer.Bytes(), err
+}
+
 // decodeItems decodes items and writes them to dst. Because items are stored in a map,
 // keys are needed to maintain order.
 func decodeItems(keys []*datastore.Key, items map[string]*memcache.Item, dst interface{}) error {
@@ -184,57 +168,43 @@ func decodeItems(keys []*datastore.Key, items map[string]*memcache.Item, dst int
 	multiArgType, _ := checkMultiArg(v)
 	for i, key := range keys {
 		item := items[key.Encode()]
-		elem := v.Index(i)
+		d := v.Index(i)
 		if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
-			elem = elem.Addr()
+			d = d.Addr()
 		}
-		// TODO fix
-		err := decode(item.Value, elem.Interface())
-		if err != nil {
+		if err := decode(item.Value, d); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// GetOnlyMulti is a read only version of GetMulti. memcache is not written to on cache miss.
-func GetOnlyMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error {
-	return getMulti(c, keys, dst, true)
+// decode decodes b into dst using a gob.Decoder
+func decode(b []byte, dst reflect.Value) error {
+	reader := bytes.NewReader(b)
+	decoder := gob.NewDecoder(reader)
+	return decoder.DecodeValue(dst)
 }
 
 // Put saves the entity src into memcache using memcache.Set() and datastore with key k. src must be a struct
 // pointer or implement PropertyLoadSaver; if a struct pointer then any unexported fields of that struct will
 // be skipped. If k is an incomplete key, the returned key will be a unique key generated by the datastore.
 func Put(c appengine.Context, key *datastore.Key, src interface{}) (*datastore.Key, error) {
-	if !key.Incomplete() {
-		// cache
-		value, err := encode(src)
-		if err == nil {
-			item := memcache.Item{Key: key.Encode(), Value: value}
-			err = memcache.Set(c, &item)
-			if err != nil {
-				c.Warningf(err.Error())
-			}
-		} else {
-			c.Warningf(err.Error())
+	keys, err := PutMulti(c, []*datastore.Key{key}, []interface{}{src})
+	if err != nil {
+		if me, ok := err.(appengine.MultiError); ok {
+			return nil, me[0]
 		}
+		return nil, err
 	}
-	// store
-	return datastore.Put(c, key, src)
+	return keys[0], nil
 }
 
 // PutMulti is a batch version of Put.
 //
 // src must satisfy the same conditions as the dst argument to GetMulti.
 func PutMulti(c appengine.Context, keys []*datastore.Key, src interface{}) ([]*datastore.Key, error) {
-	// cache
-	items, err := encodeItems(keys, src)
-	if err == nil {
-		err = memcache.SetMulti(c, items)
-	}
-	if err != nil {
-		c.Warningf(err.Error())
-	}
-	// store
-	return datastore.PutMulti(c, keys, src)
+	keys, err := datastore.PutMulti(c, keys, src)
+	cache(keys, src, c)
+	return keys, err
 }

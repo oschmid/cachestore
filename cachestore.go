@@ -66,7 +66,6 @@ func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
 	if me, ok := err.(appengine.MultiError); ok {
 		return me[0]
 	}
-	c.Infof("get: %#v", dst)
 	return err
 }
 
@@ -104,7 +103,6 @@ func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error
 			c.Debugf("reading from cache: %#v", dst)
 		}
 	}
-	c.Infof("get multi: %#v", dst) // TODO fix dst not getting passed
 	return err
 }
 
@@ -141,7 +139,7 @@ func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, e
 			if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
 				elem = elem.Addr()
 			}
-			value, err := encode(elem)
+			value, err := encode(elem.Interface())
 			if err != nil {
 				return items, err
 			}
@@ -152,12 +150,40 @@ func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, e
 	return items, nil
 }
 
-// TODO memcache items are restricted to 1MB
-// encode encodes v using gob.Encoder
-func encode(v reflect.Value) ([]byte, error) {
+// encode encodes src using gob.Encoder
+func encode(src interface{}) (b []byte, err error) {
+	c := make(chan datastore.Property, 32)
+	donec := make(chan struct{})
+	go func() {
+		b, err = propertiesToGob(c)
+		close(donec)
+	}()
+	var err1 error
+	if e, ok := src.(datastore.PropertyLoadSaver); ok {
+		err1 = e.Save(c)
+	} else {
+		err1 = datastore.SaveStruct(src, c)
+	}
+	<-donec
+	if err1 != nil {
+		return nil, err1
+	}
+	return b, err
+}
+
+func propertiesToGob(src <-chan datastore.Property) ([]byte, error) {
+	defer func() {
+		for _ = range src {
+			// Drain the src channel, if we exit early.
+		}
+	}()
+	properties := *new([]datastore.Property)
+	for p := range src {
+		properties = append(properties, p)
+	}
 	buffer := new(bytes.Buffer)
 	encoder := gob.NewEncoder(buffer)
-	err := encoder.EncodeValue(v)
+	err := encoder.Encode(properties)
 	return buffer.Bytes(), err
 }
 
@@ -166,24 +192,57 @@ func encode(v reflect.Value) ([]byte, error) {
 func decodeItems(keys []*datastore.Key, items map[string]*memcache.Item, dst interface{}) error {
 	v := reflect.ValueOf(dst)
 	multiArgType, _ := checkMultiArg(v)
+	multiErr, any := make(appengine.MultiError, len(keys)), false
 	for i, key := range keys {
 		item := items[key.Encode()]
-		d := v.Index(i)
-		if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
-			d = d.Addr()
+		if item == nil {
+			multiErr[i] = datastore.ErrNoSuchEntity
+		} else {
+			d := v.Index(i)
+			if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
+				d = d.Addr()
+			}
+			multiErr[i] = decode(item.Value, d.Interface())
 		}
-		if err := decode(item.Value, d); err != nil {
-			return err
+		if multiErr[i] != nil {
+			any = true
 		}
+	}
+	if any {
+		return multiErr
 	}
 	return nil
 }
 
 // decode decodes b into dst using a gob.Decoder
-func decode(b []byte, dst reflect.Value) error {
+func decode(b []byte, dst interface{}) (err error) {
+	c := make(chan datastore.Property, 32)
+	errc := make(chan error, 1)
+	defer func() {
+		if err == nil {
+			err = <-errc
+		}
+	}()
+	go gobToProperties(c, errc, b)
+	if e, ok := dst.(datastore.PropertyLoadSaver); ok {
+		return e.Load(c)
+	}
+	return datastore.LoadStruct(dst, c)
+}
+
+func gobToProperties(dst chan<- datastore.Property, errc chan<- error, b []byte) {
+	defer close(dst)
+	var properties []datastore.Property
 	reader := bytes.NewReader(b)
 	decoder := gob.NewDecoder(reader)
-	return decoder.DecodeValue(dst)
+	if err := decoder.Decode(&properties); err != nil {
+		errc <- err
+		return
+	}
+	for _, p := range properties {
+		dst <- p
+	}
+	errc <- nil
 }
 
 // Put saves the entity src into memcache using memcache.Set() and datastore with key k. src must be a struct

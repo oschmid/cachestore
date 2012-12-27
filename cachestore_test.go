@@ -21,7 +21,7 @@ import (
 	"appengine/datastore"
 	"appengine/memcache"
 	"encoding/gob"
-	//	"fmt"
+	"fmt"
 	"github.com/oschmid/appenginetesting"
 	"reflect"
 	"testing"
@@ -44,21 +44,23 @@ type Struct struct {
 	I int
 }
 
-// TODO implement and test the automatic caching of PropertyLoadSavers
 type PropertyLoadSaver struct {
-	s string
+	S string
 }
 
 func (p *PropertyLoadSaver) Load(c <-chan datastore.Property) error {
-	property := <-c
-	p.s = property.Value.(string) + ".load"
+	if err := datastore.LoadStruct(p, c); err != nil {
+		return err
+	}
+	p.S += ".load"
 	return nil
 }
 
 func (p *PropertyLoadSaver) Save(c chan<- datastore.Property) error {
+	defer close(c)
 	c <- datastore.Property{
-		Name:  "Property",
-		Value: p.s + ".save",
+		Name:  "S",
+		Value: p.S + ".save",
 	}
 	return nil
 }
@@ -157,92 +159,92 @@ func TestDecodeStructPointerArrayToStructArray(t *testing.T) {
 	}
 }
 
-//func TestDecodePropertyLoadSaverArray(t *testing.T) {
-//	src, keys, items := encodePropertyLoadSaverArray(t)
-//	dst := make([]PropertyLoadSaver, len(src))
-//	itemsMap := makeItemsMap(keys, items)
-//	if err := decodeItems(keys, itemsMap, dst); err != nil {
-//		t.Fatal(err)
-//	}
-//	for i, d := range dst {
-//		if d.s != src[i].s+".save.load" {
-//			t.Fatal("actual=%v", d.s)
-//		}
-//	}
-//}
-//
-//func encodePropertyLoadSaverArray(t *testing.T) ([]PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
-//	src := *new([]PropertyLoadSaver)
-//	keys := *new([]*datastore.Key)
-//	for i := 1; i <= 10; i++ {
-//		src = append(src, PropertyLoadSaver{s: fmt.Sprint(i)})
-//		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
-//	}
-//	items, err := encodeItems(keys, src)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	if len(items) != len(src) {
-//		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-//	}
-//	return src, keys, items
-//}
-//
-//func TestDecodePropertyLoadSaverPointerArray(t *testing.T) {
-//	src, keys, items := encodePropertyLoadSaverPointerArray(t)
-//	dst := make([]*PropertyLoadSaver, len(src))
-//	itemsMap := makeItemsMap(keys, items)
-//	if err := decodeItems(keys, itemsMap, dst); err != nil {
-//		t.Fatal(err)
-//	}
-//	for i, d := range dst {
-//		if d.s != src[i].s+".save.load" {
-//			t.Fatalf("actual=%v", d.s)
-//		}
-//	}
-//}
-//
-//func encodePropertyLoadSaverPointerArray(t *testing.T) ([]*PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
-//	src := *new([]*PropertyLoadSaver)
-//	keys := *new([]*datastore.Key)
-//	for i := 1; i <= 10; i++ {
-//		src = append(src, &PropertyLoadSaver{s: fmt.Sprint(i)})
-//		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
-//	}
-//	items, err := encodeItems(keys, src)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	if len(items) != len(src) {
-//		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-//	}
-//	return src, keys, items
-//}
-//
-//func TestDecodePropertyLoadSaverArrayToPointerArray(t *testing.T) {
-//	src, keys, items := encodePropertyLoadSaverArray(t)
-//	dst := make([]*PropertyLoadSaver, len(src))
-//	itemsMap := makeItemsMap(keys, items)
-//	if err := decodeItems(keys, itemsMap, dst); err != nil {
-//		t.Fatal(err)
-//	}
-//	for i, d := range dst {
-//		if d.s != src[i].s+".save.load" {
-//			t.Fatalf("actual=%v", d.s)
-//		}
-//	}
-//}
-//
-//func TestDecodePropertyLoadSaverPointerArrayToArray(t *testing.T) {
-//	src, keys, items := encodePropertyLoadSaverPointerArray(t)
-//	dst := make([]PropertyLoadSaver, len(src))
-//	itemsMap := makeItemsMap(keys, items)
-//	if err := decodeItems(keys, itemsMap, dst); err != nil {
-//		t.Fatal(err)
-//	}
-//	for i, d := range dst {
-//		if d.s != src[i].s+".save.load" {
-//			t.Fatalf("actual=%v", d.s)
-//		}
-//	}
-//}
+func TestDecodePropertyLoadSaverArray(t *testing.T) {
+	src, keys, items := encodePropertyLoadSaverArray(t)
+	dst := make([]PropertyLoadSaver, len(src))
+	itemsMap := makeItemsMap(keys, items)
+	if err := decodeItems(keys, itemsMap, dst); err != nil {
+		t.Fatal(err)
+	}
+	for i, d := range dst {
+		if d.S != src[i].S+".save.load" {
+			t.Fatal("actual=%v", d.S)
+		}
+	}
+}
+
+func encodePropertyLoadSaverArray(t *testing.T) ([]PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
+	src := *new([]PropertyLoadSaver)
+	keys := *new([]*datastore.Key)
+	for i := 1; i <= 10; i++ {
+		src = append(src, PropertyLoadSaver{S: fmt.Sprint(i)})
+		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
+	}
+	items, err := encodeItems(keys, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != len(src) {
+		t.Fatalf("expected=%d actual=%d", len(src), len(items))
+	}
+	return src, keys, items
+}
+
+func TestDecodePropertyLoadSaverPointerArray(t *testing.T) {
+	src, keys, items := encodePropertyLoadSaverPointerArray(t)
+	dst := make([]*PropertyLoadSaver, len(src))
+	itemsMap := makeItemsMap(keys, items)
+	if err := decodeItems(keys, itemsMap, dst); err != nil {
+		t.Fatal(err)
+	}
+	for i, d := range dst {
+		if d.S != src[i].S+".save.load" {
+			t.Fatalf("actual=%v", d.S)
+		}
+	}
+}
+
+func encodePropertyLoadSaverPointerArray(t *testing.T) ([]*PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
+	src := *new([]*PropertyLoadSaver)
+	keys := *new([]*datastore.Key)
+	for i := 1; i <= 10; i++ {
+		src = append(src, &PropertyLoadSaver{S: fmt.Sprint(i)})
+		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
+	}
+	items, err := encodeItems(keys, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != len(src) {
+		t.Fatalf("expected=%d actual=%d", len(src), len(items))
+	}
+	return src, keys, items
+}
+
+func TestDecodePropertyLoadSaverArrayToPointerArray(t *testing.T) {
+	src, keys, items := encodePropertyLoadSaverArray(t)
+	dst := make([]*PropertyLoadSaver, len(src))
+	itemsMap := makeItemsMap(keys, items)
+	if err := decodeItems(keys, itemsMap, dst); err != nil {
+		t.Fatal(err)
+	}
+	for i, d := range dst {
+		if d.S != src[i].S+".save.load" {
+			t.Fatalf("actual=%v", d.S)
+		}
+	}
+}
+
+func TestDecodePropertyLoadSaverPointerArrayToArray(t *testing.T) {
+	src, keys, items := encodePropertyLoadSaverPointerArray(t)
+	dst := make([]PropertyLoadSaver, len(src))
+	itemsMap := makeItemsMap(keys, items)
+	if err := decodeItems(keys, itemsMap, dst); err != nil {
+		t.Fatal(err)
+	}
+	for i, d := range dst {
+		if d.S != src[i].S+".save.load" {
+			t.Fatalf("actual=%v", d.S)
+		}
+	}
+}

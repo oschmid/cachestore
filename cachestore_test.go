@@ -18,6 +18,7 @@ along with cachestore.  If not, see <http://www.gnu.org/licenses/>.
 package cachestore
 
 import (
+	"appengine"
 	"appengine/datastore"
 	"appengine/memcache"
 	"encoding/gob"
@@ -65,186 +66,206 @@ func (p *PropertyLoadSaver) Save(c chan<- datastore.Property) error {
 	return nil
 }
 
-func TestDecodeStructArray(t *testing.T) {
-	src, keys, items := encodeStructArray(t)
-	dst := make([]Struct, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+func TestPutGetDeleteStruct(t *testing.T) {
+	src := Struct{I: 3}
+	key := datastore.NewIncompleteKey(c, "Struct", nil)
+	// Put
+	key, err := Put(c, key, &src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Get
+	dst := *new(Struct)
+	err = Get(c, key, &dst)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(src, dst) {
 		t.Fatalf("expected=%#v actual=%#v", src, dst)
 	}
+	// Delete
+	err = Delete(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Get(c, key, &dst)
+	if err != datastore.ErrNoSuchEntity {
+		t.Fatal("expected=%#v actual=%#v", datastore.ErrNoSuchEntity, err)
+	}
 }
 
-func encodeStructArray(t *testing.T) ([]Struct, []*datastore.Key, []*memcache.Item) {
+func TestPutMultiGetMultiDeleteMultiStruct(t *testing.T) {
 	src := *new([]Struct)
-	keys := *new([]*datastore.Key)
-	for i := 1; i <= 10; i++ {
+	key := *new([]*datastore.Key)
+	for i := 1; i < 11; i++ {
 		src = append(src, Struct{I: i})
-		keys = append(keys, datastore.NewKey(c, "Struct", "", int64(i), nil))
+		key = append(key, datastore.NewIncompleteKey(c, "Struct", nil))
 	}
-	items, err := encodeItems(keys, src)
+	// PutMulti
+	key, err := PutMulti(c, key, src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != len(src) {
-		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-	}
-	return src, keys, items
-}
-
-func makeItemsMap(keys []*datastore.Key, items []*memcache.Item) map[string]*memcache.Item {
-	itemsMap := make(map[string]*memcache.Item)
-	for i, key := range keys {
-		itemsMap[key.Encode()] = items[i]
-	}
-	return itemsMap
-}
-
-func TestDecodeStructPointerArray(t *testing.T) {
-	src, keys, items := encodeStructPointerArray(t)
-	dst := make([]*Struct, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+	// GetMulti
+	dst := make([]Struct, len(src))
+	err = GetMulti(c, key, dst)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(src, dst) {
 		t.Fatalf("expected=%#v actual=%#v", src, dst)
 	}
-}
-
-func encodeStructPointerArray(t *testing.T) ([]*Struct, []*datastore.Key, []*memcache.Item) {
-	src := *new([]*Struct)
-	keys := *new([]*datastore.Key)
-	for i := 1; i <= 10; i++ {
-		src = append(src, &Struct{I: i})
-		keys = append(keys, datastore.NewKey(c, "Struct", "", int64(i), nil))
-	}
-	items, err := encodeItems(keys, src)
+	// DeleteMulti
+	err = DeleteMulti(c, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != len(src) {
-		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-	}
-	return src, keys, items
-}
-
-func TestDecodeStructArrayToStructPointerArray(t *testing.T) {
-	src, keys, items := encodeStructArray(t)
-	dst := make([]*Struct, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+	err = GetMulti(c, key, dst)
+	if me, ok := err.(appengine.MultiError); ok {
+		for _, e := range me {
+			if e != datastore.ErrNoSuchEntity {
+				t.Fatal(e)
+			}
+		}
+	} else {
 		t.Fatal(err)
 	}
-	for i, d := range dst {
-		if !reflect.DeepEqual(*d, src[i]) {
-			t.Fatalf("expected=%#v actual=%#v", src[i], *d)
-		}
-	}
 }
 
-func TestDecodeStructPointerArrayToStructArray(t *testing.T) {
-	src, keys, items := encodeStructPointerArray(t)
-	dst := make([]Struct, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+func TestPutGetDeletePropertyLoadSaver(t *testing.T) {
+	src := PropertyLoadSaver{}
+	key := datastore.NewIncompleteKey(c, "PropertyLoadSaver", nil)
+	// Put
+	key, err := Put(c, key, &src)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for i, d := range dst {
-		if !reflect.DeepEqual(d, *src[i]) {
-			t.Fatalf("expected=%#v actual=%#v", *src[i], d)
-		}
-	}
-}
-
-func TestDecodePropertyLoadSaverArray(t *testing.T) {
-	src, keys, items := encodePropertyLoadSaverArray(t)
-	dst := make([]PropertyLoadSaver, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+	// Get
+	dst := *new(PropertyLoadSaver)
+	err = Get(c, key, &dst)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for i, d := range dst {
-		if d.S != src[i].S+".save.load" {
-			t.Fatal("actual=%v", d.S)
-		}
+	if dst.S != src.S+".save.load" {
+		t.Fatalf("actual=%#v", dst.S)
+	}
+	// Delete
+	err = Delete(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Get(c, key, &dst)
+	if err != datastore.ErrNoSuchEntity {
+		t.Fatal("expected=%#v actual=%#v", datastore.ErrNoSuchEntity, err)
 	}
 }
 
-func encodePropertyLoadSaverArray(t *testing.T) ([]PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
+func TestPutMultiGetMultiDeleteMultiPropertyLoadSaver(t *testing.T) {
 	src := *new([]PropertyLoadSaver)
-	keys := *new([]*datastore.Key)
-	for i := 1; i <= 10; i++ {
+	key := *new([]*datastore.Key)
+	for i := 1; i < 11; i++ {
 		src = append(src, PropertyLoadSaver{S: fmt.Sprint(i)})
-		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
+		key = append(key, datastore.NewIncompleteKey(c, "PropertyLoadSaver", nil))
 	}
-	items, err := encodeItems(keys, src)
+	// PutMulti
+	key, err := PutMulti(c, key, src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != len(src) {
-		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-	}
-	return src, keys, items
-}
-
-func TestDecodePropertyLoadSaverPointerArray(t *testing.T) {
-	src, keys, items := encodePropertyLoadSaverPointerArray(t)
-	dst := make([]*PropertyLoadSaver, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
-		t.Fatal(err)
-	}
-	for i, d := range dst {
-		if d.S != src[i].S+".save.load" {
-			t.Fatalf("actual=%v", d.S)
-		}
-	}
-}
-
-func encodePropertyLoadSaverPointerArray(t *testing.T) ([]*PropertyLoadSaver, []*datastore.Key, []*memcache.Item) {
-	src := *new([]*PropertyLoadSaver)
-	keys := *new([]*datastore.Key)
-	for i := 1; i <= 10; i++ {
-		src = append(src, &PropertyLoadSaver{S: fmt.Sprint(i)})
-		keys = append(keys, datastore.NewKey(c, "PropertyLoadSaver", "", int64(i), nil))
-	}
-	items, err := encodeItems(keys, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != len(src) {
-		t.Fatalf("expected=%d actual=%d", len(src), len(items))
-	}
-	return src, keys, items
-}
-
-func TestDecodePropertyLoadSaverArrayToPointerArray(t *testing.T) {
-	src, keys, items := encodePropertyLoadSaverArray(t)
-	dst := make([]*PropertyLoadSaver, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
-		t.Fatal(err)
-	}
-	for i, d := range dst {
-		if d.S != src[i].S+".save.load" {
-			t.Fatalf("actual=%v", d.S)
-		}
-	}
-}
-
-func TestDecodePropertyLoadSaverPointerArrayToArray(t *testing.T) {
-	src, keys, items := encodePropertyLoadSaverPointerArray(t)
+	// GetMulti
 	dst := make([]PropertyLoadSaver, len(src))
-	itemsMap := makeItemsMap(keys, items)
-	if err := decodeItems(keys, itemsMap, dst); err != nil {
+	err = GetMulti(c, key, dst)
+	if err != nil {
 		t.Fatal(err)
 	}
 	for i, d := range dst {
 		if d.S != src[i].S+".save.load" {
-			t.Fatalf("actual=%v", d.S)
+			t.Fatalf("actual%#v", d.S)
 		}
 	}
+	// DeleteMulti
+	err = DeleteMulti(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = GetMulti(c, key, dst)
+	if me, ok := err.(appengine.MultiError); ok {
+		for _, e := range me {
+			if e != datastore.ErrNoSuchEntity {
+				t.Fatal(e)
+			}
+		}
+	} else {
+		t.Fatal(err)
+	}
 }
+
+func TestMemcacheGet(t *testing.T) {
+	src := Struct{I: 3}
+	key := datastore.NewIncompleteKey(c, "Struct", nil)
+	// Put
+	key, err := Put(c, key, &src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// remove from datastore
+	err = datastore.Delete(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Get
+	dst := *new(Struct)
+	err = Get(c, key, &dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(src, dst) {
+		t.Fatalf("expected=%#v actual=%#v", src, dst)
+	}
+	// Delete
+	err = Delete(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Get(c, key, &dst)
+	if err != datastore.ErrNoSuchEntity {
+		t.Fatal("expected=%#v actual=%#v", datastore.ErrNoSuchEntity, err)
+	}
+}
+
+func TestDatastoreGet(t *testing.T) {
+	src := Struct{I: 3}
+	key := datastore.NewIncompleteKey(c, "Struct", nil)
+	// Put
+	key, err := Put(c, key, &src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// remove from memcache
+	err = memcache.Delete(c, key.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Get
+	dst := *new(Struct)
+	err = Get(c, key, &dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(src, dst) {
+		t.Fatalf("expected=%#v actual=%#v", src, dst)
+	}
+	// Delete
+	err = Delete(c, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Get(c, key, &dst)
+	if err != datastore.ErrNoSuchEntity {
+		t.Fatal("expected=%#v actual=%#v", datastore.ErrNoSuchEntity, err)
+	}
+}
+
+// TODO test []*S
+
+// TODO test []I

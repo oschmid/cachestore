@@ -34,34 +34,6 @@ import (
 
 var Debug = false // If true, print debug info
 
-// Delete deletes the entity for the given key from memcache and datastore.
-func Delete(c appengine.Context, key *datastore.Key) error {
-	err := DeleteMulti(c, []*datastore.Key{key})
-	if me, ok := err.(appengine.MultiError); ok {
-		return me[0]
-	}
-	return err
-}
-
-// DeleteMulti is a batched version of Delete.
-func DeleteMulti(c appengine.Context, keys []*datastore.Key) error {
-	errm := memcache.DeleteMulti(c, encodeKeys(keys))
-	errd := datastore.DeleteMulti(c, keys)
-	if errd != nil {
-		return errd
-	}
-	return errm
-}
-
-// encodeKeys returns an array of string encoded datastore.Keys
-func encodeKeys(keys []*datastore.Key) []string {
-	encodedKeys := make([]string, len(keys))
-	for i, key := range keys {
-		encodedKeys[i] = key.Encode()
-	}
-	return encodedKeys
-}
-
 // Get loads the entity stored for key (from memcached if it has been cached, datastore otherwise) into dst,
 // which must be a struct pointer or implement PropertyLoadSaver. If there is no such entity for the key,
 // Get returns ErrNoSuchEntity.
@@ -89,14 +61,14 @@ func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
 //
 // As a special case, PropertyList is an invalid type for dst, even though a PropertyList is a slice of structs.
 // It is treated as invalid to avoid being mistakenly passed when []PropertyList was intended.
-func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error {
+func GetMulti(c appengine.Context, key []*datastore.Key, dst interface{}) error {
 	// check cache
-	encodedKeys := encodeKeys(keys)
+	encodedKeys := encodeKeys(key)
 	itemMap, errm := memcache.GetMulti(c, encodedKeys)
-	if len(itemMap) != len(keys) {
+	if len(itemMap) != len(key) {
 		// TODO benchmark loading all vs loading missing
 		// load from datastore
-		errd := datastore.GetMulti(c, keys, dst)
+		errd := datastore.GetMulti(c, key, dst)
 		if Debug {
 			c.Debugf("reading from store: %#v", dst)
 		}
@@ -104,9 +76,9 @@ func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error
 			return errd
 		}
 		// cache for next time
-		errm = cache(keys, dst, c)
+		errm = cache(key, dst, c)
 	} else {
-		errm = decodeItems(keys, itemMap, dst)
+		errm = decodeItems(key, itemMap, dst)
 		if Debug {
 			c.Debugf("reading from cache: %#v", dst)
 		}
@@ -114,9 +86,18 @@ func GetMulti(c appengine.Context, keys []*datastore.Key, dst interface{}) error
 	return errm
 }
 
+// encodeKeys returns an array of string encoded datastore.Keys
+func encodeKeys(key []*datastore.Key) []string {
+	encodedKeys := make([]string, len(key))
+	for i, k := range key {
+		encodedKeys[i] = k.Encode()
+	}
+	return encodedKeys
+}
+
 // cache writes structs and PropertyLoadSavers to memcache.
-func cache(keys []*datastore.Key, src interface{}, c appengine.Context) error {
-	items, err := encodeItems(keys, src)
+func cache(key []*datastore.Key, src interface{}, c appengine.Context) error {
+	items, err := encodeItems(key, src)
 	if len(items) > 0 && err == nil {
 		if Debug {
 			c.Debugf("writing to cache: %#v", src)
@@ -127,12 +108,12 @@ func cache(keys []*datastore.Key, src interface{}, c appengine.Context) error {
 }
 
 // encodeItems returns an array of memcache.Items for all key/value pair where the key is not incomplete.
-func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, error) {
-	v := reflect.ValueOf(values)
+func encodeItems(key []*datastore.Key, src interface{}) ([]*memcache.Item, error) {
+	v := reflect.ValueOf(src)
 	multiArgType, _ := checkMultiArg(v)
 	items := *new([]*memcache.Item)
-	for i, key := range keys {
-		if !key.Incomplete() {
+	for i, k := range key {
+		if !k.Incomplete() {
 			elem := v.Index(i)
 			if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
 				elem = elem.Addr()
@@ -141,7 +122,7 @@ func encodeItems(keys []*datastore.Key, values interface{}) ([]*memcache.Item, e
 			if err != nil {
 				return items, err
 			}
-			item := &memcache.Item{Key: key.Encode(), Value: value}
+			item := &memcache.Item{Key: k.Encode(), Value: value}
 			items = append(items, item)
 		}
 	}
@@ -186,12 +167,12 @@ func propertiesToGob(src <-chan datastore.Property) ([]byte, error) {
 }
 
 // decodeItems decodes items and writes them to dst.
-func decodeItems(keys []*datastore.Key, items map[string]*memcache.Item, dst interface{}) error {
+func decodeItems(key []*datastore.Key, items map[string]*memcache.Item, dst interface{}) error {
 	v := reflect.ValueOf(dst)
 	multiArgType, _ := checkMultiArg(v)
-	multiErr, any := make(appengine.MultiError, len(keys)), false
-	for i, key := range keys {
-		item := items[key.Encode()]
+	multiErr, any := make(appengine.MultiError, len(key)), false
+	for i, k := range key {
+		item := items[k.Encode()]
 		if item == nil {
 			multiErr[i] = datastore.ErrNoSuchEntity
 		} else {
@@ -251,23 +232,42 @@ func gobToProperties(dst chan<- datastore.Property, errc chan<- error, b []byte)
 // of that struct will be skipped. If k is an incomplete key, the returned key will be a unique key generated
 // by the datastore.
 func Put(c appengine.Context, key *datastore.Key, src interface{}) (*datastore.Key, error) {
-	keys, err := PutMulti(c, []*datastore.Key{key}, []interface{}{src})
+	k, err := PutMulti(c, []*datastore.Key{key}, []interface{}{src})
 	if err != nil {
 		if me, ok := err.(appengine.MultiError); ok {
 			return nil, me[0]
 		}
 		return nil, err
 	}
-	return keys[0], nil
+	return k[0], nil
 }
 
 // PutMulti is a batch version of Put.
 //
 // src must satisfy the same conditions as the dst argument to GetMulti.
-func PutMulti(c appengine.Context, keys []*datastore.Key, src interface{}) ([]*datastore.Key, error) {
-	keys, errd := datastore.PutMulti(c, keys, src)
+func PutMulti(c appengine.Context, key []*datastore.Key, src interface{}) ([]*datastore.Key, error) {
+	key, errd := datastore.PutMulti(c, key, src)
 	if errd == nil {
-		return keys, cache(keys, src, c)
+		return key, cache(key, src, c)
 	}
-	return keys, errd
+	return key, errd
+}
+
+// Delete deletes the entity for the given key from memcache and datastore.
+func Delete(c appengine.Context, key *datastore.Key) error {
+	err := DeleteMulti(c, []*datastore.Key{key})
+	if me, ok := err.(appengine.MultiError); ok {
+		return me[0]
+	}
+	return err
+}
+
+// DeleteMulti is a batched version of Delete.
+func DeleteMulti(c appengine.Context, key []*datastore.Key) error {
+	errm := memcache.DeleteMulti(c, encodeKeys(key))
+	errd := datastore.DeleteMulti(c, key)
+	if errd != nil {
+		return errd
+	}
+	return errm
 }

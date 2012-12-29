@@ -240,6 +240,10 @@ func gobToProperties(dst chan<- datastore.Property, errc chan<- error, b []byte)
 		return
 	}
 	for _, p := range properties {
+		// gob encoded key pointers as keys, convert them back to pointers
+		if key, ok := p.Value.(datastore.Key); ok {
+			p.Value = &key
+		}
 		dst <- p
 	}
 	errc <- nil

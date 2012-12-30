@@ -66,7 +66,7 @@ func (p *PropertyLoadSaver) Save(c chan<- datastore.Property) error {
 	return nil
 }
 
-func TestPutGetDeleteStruct(t *testing.T) {
+func TestWithStruct(t *testing.T) {
 	src := Struct{I: 3}
 	key := datastore.NewIncompleteKey(c, "Struct", nil)
 	// Put
@@ -94,7 +94,7 @@ func TestPutGetDeleteStruct(t *testing.T) {
 	}
 }
 
-func TestPutMultiGetMultiDeleteMultiStruct(t *testing.T) {
+func TestWithStructArray(t *testing.T) {
 	src := *new([]Struct)
 	key := *new([]*datastore.Key)
 	for i := 1; i < 11; i++ {
@@ -132,7 +132,11 @@ func TestPutMultiGetMultiDeleteMultiStruct(t *testing.T) {
 	}
 }
 
-func TestPutGetDeletePropertyLoadSaver(t *testing.T) {
+// TODO test []*S
+
+// TODO test []I
+
+func TestWithPropertyLoadSaver(t *testing.T) {
 	src := PropertyLoadSaver{}
 	key := datastore.NewIncompleteKey(c, "PropertyLoadSaver", nil)
 	// Put
@@ -160,7 +164,7 @@ func TestPutGetDeletePropertyLoadSaver(t *testing.T) {
 	}
 }
 
-func TestPutMultiGetMultiDeleteMultiPropertyLoadSaver(t *testing.T) {
+func TestWithPropertyLoadSaverArray(t *testing.T) {
 	src := *new([]PropertyLoadSaver)
 	key := *new([]*datastore.Key)
 	for i := 1; i < 11; i++ {
@@ -200,7 +204,7 @@ func TestPutMultiGetMultiDeleteMultiPropertyLoadSaver(t *testing.T) {
 	}
 }
 
-func TestMemcacheGet(t *testing.T) {
+func TestGetFromMemcache(t *testing.T) {
 	src := Struct{I: 3}
 	key := datastore.NewIncompleteKey(c, "Struct", nil)
 	// Put
@@ -233,7 +237,7 @@ func TestMemcacheGet(t *testing.T) {
 	}
 }
 
-func TestDatastoreGet(t *testing.T) {
+func TestGetFromDatastore(t *testing.T) {
 	src := Struct{I: 3}
 	key := datastore.NewIncompleteKey(c, "Struct", nil)
 	// Put
@@ -265,7 +269,3 @@ func TestDatastoreGet(t *testing.T) {
 		t.Fatal("expected=%#v actual=%#v", datastore.ErrNoSuchEntity, err)
 	}
 }
-
-// TODO test []*S
-
-// TODO test []I

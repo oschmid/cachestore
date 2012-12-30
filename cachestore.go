@@ -180,7 +180,7 @@ func decodeItems(key []*datastore.Key, items map[string]*memcache.Item, dst inte
 			if multiArgType == multiArgTypePropertyLoadSaver || multiArgType == multiArgTypeStruct {
 				d = d.Addr()
 			}
-			multiErr[i] = decode(item.Value, d.Interface())
+			multiErr[i] = decode(d.Interface(), item.Value)
 		}
 		if multiErr[i] != nil {
 			any = true
@@ -193,7 +193,7 @@ func decodeItems(key []*datastore.Key, items map[string]*memcache.Item, dst inte
 }
 
 // decode decodes b into dst using a gob.Decoder
-func decode(b []byte, dst interface{}) (err error) {
+func decode(dst interface{}, b []byte) (err error) {
 	c := make(chan datastore.Property, 32)
 	errc := make(chan error, 1)
 	defer func() {

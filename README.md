@@ -1,8 +1,9 @@
 cachestore
 ==========
 
-Getting objects from datastore and loading them into memcache to speed up future reads is a common pattern.
-Using the same method signatures as appengine.datastore, this package has all reads first check memcache before
-calling datastore and all writes write to both memcache and datastore.
+This is a drop-in replacement of appengine/datastore that automatically caches structs and PropertyLoadSavers in memcache.
+* If Get or GetMulti miss when reading from memcache, they fallback to reading from datastore and load the result into memcache for next time.
+* Put and PutMulti write to memcache and datastore.
+* Delete and DeleteMulti delete from memcache and datastore.
 
-memcache.Items are created using datastore.Key.Encode() as the string key and gob encoded objects for values.
+cachestore uses datastore keys and gob encoded values to create memcache items

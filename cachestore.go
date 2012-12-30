@@ -30,9 +30,16 @@ import (
 	"bytes"
 	"encoding/gob"
 	"reflect"
+	"time"
 )
 
 var Debug = false // If true, print debug info
+
+func init() {
+	// register basic datastore types
+	gob.Register(time.Time{})
+	gob.Register(datastore.Key{})
+}
 
 // Get loads the entity stored for key (from memcached if it has been cached, datastore otherwise) into dst,
 // which must be a struct pointer or implement PropertyLoadSaver. If there is no such entity for the key,

@@ -78,7 +78,7 @@ func GetMulti(c appengine.Context, key []*datastore.Key, dst interface{}) error 
 		// load from datastore
 		errd := datastore.GetMulti(c, key, dst)
 		if Debug {
-			c.Debugf("reading from store: %#v", dst)
+			c.Debugf("reading from datastore: %#v", dst)
 		}
 		if errd != nil {
 			return errd
@@ -88,7 +88,7 @@ func GetMulti(c appengine.Context, key []*datastore.Key, dst interface{}) error 
 	} else {
 		errm = decodeItems(key, itemMap, dst)
 		if Debug {
-			c.Debugf("reading from cache: %#v", dst)
+			c.Debugf("reading from memcache: %#v", dst)
 		}
 	}
 	return errm
@@ -113,6 +113,9 @@ func Put(c appengine.Context, key *datastore.Key, src interface{}) (*datastore.K
 //
 // src must satisfy the same conditions as the dst argument to GetMulti.
 func PutMulti(c appengine.Context, key []*datastore.Key, src interface{}) ([]*datastore.Key, error) {
+	if Debug {
+		c.Debugf("writing to datastore: %#v", src)
+	}
 	key, errd := datastore.PutMulti(c, key, src)
 	if errd == nil {
 		return key, cache(key, src, c)

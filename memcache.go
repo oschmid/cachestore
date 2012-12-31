@@ -40,7 +40,7 @@ func cache(key []*datastore.Key, src interface{}, c appengine.Context) error {
 	items, err := encodeItems(key, src)
 	if len(items) > 0 && err == nil {
 		if Debug {
-			c.Debugf("writing to cache: %#v", src)
+			c.Debugf("writing to memcache: %#v", src)
 		}
 		err = memcache.SetMulti(c, items)
 	}

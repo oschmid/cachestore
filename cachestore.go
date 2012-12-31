@@ -67,6 +67,9 @@ func Get(c appengine.Context, key *datastore.Key, dst interface{}) error {
 // As a special case, PropertyList is an invalid type for dst, even though a PropertyList is a slice of structs.
 // It is treated as invalid to avoid being mistakenly passed when []PropertyList was intended.
 func GetMulti(c appengine.Context, key []*datastore.Key, dst interface{}) error {
+	if len(key) == 0 {
+		return nil
+	}
 	// check cache
 	encodedKeys := encodeKeys(key)
 	itemMap, errm := memcache.GetMulti(c, encodedKeys)

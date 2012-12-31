@@ -13,7 +13,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with cachestore.  If not, see <http://www.gnu.org/licenses/>.
- */
+*/
 
 package cachestore
 
@@ -63,10 +63,10 @@ func encodeItems(key []*datastore.Key, src interface{}) ([]*memcache.Item, error
 				return items, err
 			}
 			item := &memcache.Item{Key: k.Encode(), Value: value}
-		items = append(items, item)
+			items = append(items, item)
+		}
 	}
-}
-return items, nil
+	return items, nil
 }
 
 // encode encodes src using gob.Encoder

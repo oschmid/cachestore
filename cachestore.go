@@ -44,7 +44,7 @@ func init() {
 // Get returns ErrNoSuchEntity.
 //
 // The values of dst's unmatched struct fields are not modified. In particular, it is recommended to pass either
-// a pointer to a zero valued struct on each Get call.
+// a pointer or a zero valued struct on each Get call.
 //
 // ErrFieldMismatch is returned when a field is to be loaded into a different type than the one it was stored from,
 // or when a field is missing or unexported in the destination struct. ErrFieldMismatch is only returned if dst is

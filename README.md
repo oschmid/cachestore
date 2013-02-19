@@ -7,3 +7,7 @@ This is a drop-in replacement of appengine/datastore that automatically caches s
 * Delete and DeleteMulti delete from memcache and datastore.
 
 cachestore uses datastore keys and gob encoded values to create memcache items
+
+Known Issues:
+* Get/Put only work with structs and not struct pointers
+* GetMulti/PutMulti only work with arrays of structs and not arrays of struct pointers

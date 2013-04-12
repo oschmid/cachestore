@@ -20,6 +20,7 @@ package cachestore
 // This file contains code copied from appengine.datastore for memcache key generation for the -multi methods.
 
 import (
+	"appengine"
 	"appengine/datastore"
 	"reflect"
 )
@@ -70,4 +71,50 @@ func checkMultiArg(v reflect.Value) (m multiArgType, elemType reflect.Type) {
 		}
 	}
 	return multiArgTypeInvalid, nil
+}
+
+// multiValid is a batch version of Key.valid. It returns an error, not a
+// []bool.
+func multiValid(key []*datastore.Key) error {
+	invalid := false
+	for _, k := range key {
+		if !valid(k) {
+			invalid = true
+			break
+		}
+	}
+	if !invalid {
+		return nil
+	}
+	err := make(appengine.MultiError, len(key))
+	for i, k := range key {
+		if !valid(k) {
+			err[i] = datastore.ErrInvalidKey
+		}
+	}
+	return err
+}
+
+// valid returns whether the key is valid.
+func valid(k *datastore.Key) bool {
+	if k == nil {
+		return false
+	}
+	for ; k != nil; k = k.Parent() {
+		if k.Kind() == "" || k.AppID() == "" {
+			return false
+		}
+		if k.StringID() != "" && k.IntID() != 0 {
+			return false
+		}
+		if k.Parent() != nil {
+			if k.Parent().Incomplete() {
+				return false
+			}
+			if k.Parent().AppID() != k.AppID() { // namespace is unexported and can't be checked
+				return false
+			}
+		}
+	}
+	return true
 }

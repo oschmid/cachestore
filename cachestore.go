@@ -28,10 +28,15 @@ import (
 	"appengine/datastore"
 	"appengine/memcache"
 	"encoding/gob"
+	"errors"
+	"reflect"
 	"time"
 )
 
 var Debug = false // If true, print debug info
+
+// Batch size for calls to datastore.PutMulti with many Items. Default suggested by Andrew Gerrand (https://groups.google.com/d/msg/google-appengine-go/qNNH6VnFrY0/be9rrA1NZXMJ)
+var BatchSize = 100
 
 func init() {
 	// register basic datastore types
@@ -116,11 +121,42 @@ func PutMulti(c appengine.Context, key []*datastore.Key, src interface{}) ([]*da
 	if Debug {
 		c.Debugf("writing to datastore: %#v", src)
 	}
-	key, errd := datastore.PutMulti(c, key, src)
+	key, errd := batchPutMulti(c, key, src)
 	if errd == nil {
 		return key, cache(key, src, c)
 	}
 	return key, errd
+}
+
+// batchPutMulti splits calls to datastore.PutMulti into batches of size BatchSize to get around datastore.PutMulti's size limit.
+func batchPutMulti(c appengine.Context, key []*datastore.Key, src interface{}) ([]*datastore.Key, error) {
+	v := reflect.ValueOf(src)
+	multiArgType, _ := checkMultiArg(v)
+	if multiArgType == multiArgTypeInvalid {
+		return nil, errors.New("datastore: src has invalid type")
+	}
+	if len(key) != v.Len() {
+		return nil, errors.New("datastore: key and src slices have different length")
+	}
+	if len(key) == 0 {
+		return nil, nil
+	}
+	if err := multiValid(key); err != nil {
+		return nil, err
+	}
+	ret := make([]*datastore.Key, len(key))
+	for lo := 0; lo <= v.Len(); lo += BatchSize {
+		hi := lo + BatchSize
+		if v.Len() < hi {
+			hi = v.Len()
+		}
+		batchKey, err := datastore.PutMulti(c, key[lo:hi], v.Slice(lo, hi).Interface())
+		if err != nil {
+			return nil, err
+		}
+		copy(ret[lo:hi], batchKey)
+	}
+	return ret, nil
 }
 
 // Delete deletes the entity for the given key from memcache and datastore.

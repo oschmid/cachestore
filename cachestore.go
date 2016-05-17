@@ -7,11 +7,12 @@
 package cachestore
 
 import (
+	"encoding/gob"
+	"time"
+
 	"appengine"
 	"appengine/datastore"
 	"appengine/memcache"
-	"encoding/gob"
-	"time"
 )
 
 var Debug = false // If true, print debug info
@@ -77,7 +78,7 @@ func GetMulti(c appengine.Context, key []*datastore.Key, dst interface{}) error 
 	return errm
 }
 
-// Put saves the entity src into datastore with key, and memcache if nothing goes wrong in saving to datastore.
+// Put saves the entity src into datastore with key, and removes it from memcache (so that it may be lazy-loaded).
 // src must be a struct pointer or implement PropertyLoadSaver; if a struct pointer then any unexported fields
 // of that struct will be skipped. If k is an incomplete key, the returned key will be a unique key generated
 // by the datastore.
@@ -100,9 +101,7 @@ func PutMulti(c appengine.Context, key []*datastore.Key, src interface{}) ([]*da
 		c.Debugf("writing to datastore: %#v", src)
 	}
 	key, errd := datastore.PutMulti(c, key, src)
-	if errd == nil {
-		return key, cache(key, src, c)
-	}
+	memcache.DeleteMulti(c, encodeKeys(key))
 	return key, errd
 }
 

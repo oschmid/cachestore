@@ -1,12 +1,13 @@
 package cachestore
 
 import (
-	"appengine"
-	"appengine/datastore"
-	"appengine/memcache"
 	"bytes"
 	"encoding/gob"
 	"reflect"
+
+	"appengine"
+	"appengine/datastore"
+	"appengine/memcache"
 )
 
 // encodeKeys returns an array of string encoded datastore.Keys

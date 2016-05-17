@@ -1,14 +1,14 @@
 package cachestore
 
 import (
-	"appengine"
-	"appengine/aetest"
-	"appengine/datastore"
-	"appengine/memcache"
 	"encoding/gob"
 	"fmt"
 	"reflect"
 	"testing"
+
+	"appengine"
+	"appengine/aetest"
+	"appengine/datastore"
 )
 
 var c = must(aetest.NewContext(nil))
@@ -195,13 +195,18 @@ func TestGetFromMemcache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// load memcache with Get
+	dst := *new(Struct)
+	err = Get(c, key, &dst)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// remove from datastore
 	err = datastore.Delete(c, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Get
-	dst := *new(Struct)
 	err = Get(c, key, &dst)
 	if err != nil {
 		t.Fatal(err)
@@ -225,11 +230,6 @@ func TestGetFromDatastore(t *testing.T) {
 	key := datastore.NewIncompleteKey(c, "Struct", nil)
 	// Put
 	key, err := Put(c, key, &src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// remove from memcache
-	err = memcache.Delete(c, key.Encode())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,8 +3,9 @@ package cachestore
 // This file contains code copied from appengine.datastore for memcache key generation for the -multi methods.
 
 import (
-	"appengine/datastore"
 	"reflect"
+
+	"appengine/datastore"
 )
 
 const (

@@ -2,18 +2,18 @@ package cachestore
 
 import (
 	"appengine"
+	"appengine/aetest"
 	"appengine/datastore"
 	"appengine/memcache"
 	"encoding/gob"
 	"fmt"
-	"github.com/oschmid/appenginetesting"
 	"reflect"
 	"testing"
 )
 
-var c = must(appenginetesting.NewContext(nil))
+var c = must(aetest.NewContext(nil))
 
-func must(c *appenginetesting.Context, err error) *appenginetesting.Context {
+func must(c aetest.Context, err error) aetest.Context {
 	if err != nil {
 		panic(err)
 	}

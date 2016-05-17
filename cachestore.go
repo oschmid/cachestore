@@ -1,20 +1,3 @@
-/*
-This file is part of cachestore.
-
-cachestore is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-cachestore is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with cachestore.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 // Cachestore automatically caches structs in memcache using gob and the structs' encoded datastore.Key.
 // Reads check memcache first, if they miss they read from datastore and write the results into memcache.
 // Writes write to both memcache and datastore. Cachestore will try to write to the datastore even if an
